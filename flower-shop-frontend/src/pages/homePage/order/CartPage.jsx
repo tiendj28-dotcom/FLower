@@ -1,0 +1,333 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ShoppingBag, Plus } from "lucide-react";
+import Header from "@/components/layout/Header";
+import Footer from "@/components/layout/Footer";
+import { Button } from "@/components/ui/button";
+import { cartService } from "@/services/cartService";
+import productService from "@/services/productService";
+import flashSaleService from "@/services/flashSaleService";
+import { toast } from "sonner";
+
+export default function CartPage() {
+  const navigate = useNavigate();
+  const [cart, setCart] = useState(() => cartService.getCart());
+  const [activeSale, setActiveSale] = useState(null);
+  const [recommendations, setRecommendations] = useState([]);
+
+  const refreshCart = () => {
+    setCart(cartService.getCart());
+  };
+
+  useEffect(() => {
+    window.addEventListener("cartUpdated", refreshCart);
+    window.addEventListener("storage", refreshCart);
+
+    return () => {
+      window.removeEventListener("cartUpdated", refreshCart);
+      window.removeEventListener("storage", refreshCart);
+    };
+  }, []);
+
+  useEffect(() => {
+    flashSaleService.getCurrentActive()
+      .then((res) => setActiveSale(res?.data || null))
+      .catch(() => { });
+  }, []);
+
+  useEffect(() => {
+    const fetchRecommendations = async () => {
+      try {
+        const res = await productService.getBestSellers({ limit: 12 });
+        const list = Array.isArray(res?.data?.data) ? res.data.data : res?.data || [];
+
+        // Filter out items already in cart
+        const cartProductIds = cart.map(item => Number(item.product_id || item.id)).filter(Boolean);
+        const filtered = list.filter(p => !cartProductIds.includes(Number(p.id)));
+
+        setRecommendations(filtered.slice(0, 4));
+      } catch (error) {
+        console.error("Lỗi lấy recommendations:", error);
+      }
+    };
+    fetchRecommendations();
+  }, [cart.length]);
+
+  const totalAmount = cartService.getTotalAmount();
+
+  const handleFastAdd = (product) => {
+    if (!product.sizes || product.sizes.length === 0) {
+      toast.error("Sản phẩm chưa có giá bán");
+      return;
+    }
+    const priceOption = product.sizes.find(s => Number(s?.price) > 0) || product.sizes[0];
+    let price = Number(priceOption.price);
+
+    if (activeSale && activeSale.product_ids?.includes(product.id)) {
+      price = Math.round(price * (1 - activeSale.discount_percent / 100));
+    }
+
+    const defaultImage = "https://png.pngtree.com/png-vector/20190820/ourmid/pngtree-no-image-vector-illustration-isolated-png-image_1694547.jpg";
+    const thumbnail = product.images?.find(img => img.isThumbnail === 1)?.image_url || product.images?.[0]?.image_url || defaultImage;
+
+    const cartItem = {
+      id: product.id,
+      product_id: product.id,
+      name: product.name,
+      image: thumbnail,
+      basePrice: price,
+      price: price,
+      quantity: 1,
+    };
+
+    cartService.addItem(cartItem);
+    toast.success(`Đã thêm ${product.name} vào giỏ`);
+    refreshCart();
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-white dark:bg-gray-900">
+      <Header />
+
+      <section className="flex-1 w-full px-4 sm:px-6 lg:px-8 py-10">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center justify-between gap-4 mb-8 flex-wrap">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Giỏ hàng</h1>
+
+            <div className="flex gap-3">
+              {cart.length > 0 && (
+                <Button
+                  variant="ghost"
+                  className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                  onClick={() => {
+                    if (window.confirm("Bạn có chắc muốn xóa tất cả sản phẩm khỏi giỏ hàng không?")) {
+                      cartService.clearCart();
+                      refreshCart();
+                      toast.success("Đã làm trống giỏ hàng");
+                    }
+                  }}
+                >
+                  Xóa tất cả
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => navigate("/products")}>
+                Tiếp tục mua hàng
+              </Button>
+            </div>
+          </div>
+
+          {cart.length === 0 ? (
+            <div className="text-center py-16 border rounded-2xl bg-gray-50 dark:bg-gray-950">
+              <ShoppingBag className="w-10 h-10 mx-auto text-gray-400 mb-3" />
+              <p className="text-gray-500 dark:text-gray-400 mb-4">Giỏ hàng của bạn đang trống</p>
+              <Button onClick={() => navigate("/products")}>
+                Tiếp tục mua hàng
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 space-y-4">
+                {cart.map((item, index) => {
+                  const cartKey = item.cartKey;
+                  const unitPrice = cartService.getItemUnitPrice(item);
+                  const itemTotal = cartService.getItemSubtotal(item);
+
+                  return (
+                    <div
+                      key={cartKey}
+                      className="border border-gray-200  rounded-2xl p-5 bg-white dark:bg-gray-900"
+                    >
+                      <div className="flex gap-4">
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          onClick={() => navigate(`/products/${item.product_id || item.id}`)}
+                          className="w-24 h-24 text-gray-900 dark:text-gray-100 rounded-xl object-cover border cursor-pointer hover:opacity-80 transition-opacity"
+                        />
+
+                        <div className="flex-1">
+                          <div className="flex items-start justify-between gap-4 flex-wrap">
+                            <div>
+                              <h3
+                                className="text-lg font-semibold cursor-pointer hover:text-amber-600 transition-colors"
+                                onClick={() => navigate(`/products/${item.product_id || item.id}`)}
+                              >
+                                {item.name}
+                              </h3>
+
+                              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                Giá gốc:{" "}
+                                {Number(
+                                  item.basePrice || item.price
+                                ).toLocaleString("vi-VN")}
+                                đ
+                              </p>
+                            </div>
+
+                            <div className="font-bold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                              {itemTotal.toLocaleString("vi-VN")}đ
+                            </div>
+                          </div>
+
+                          <p className="text-amber-600 font-bold mt-3">
+                            Đơn giá: {unitPrice.toLocaleString("vi-VN")}đ
+                          </p>
+
+                          <div className="flex items-center gap-3 mt-3 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextQty = Math.max(
+                                  1,
+                                  Number(item.quantity) - 1
+                                );
+                                cartService.updateQuantity(cartKey, nextQty);
+                                refreshCart();
+                              }}
+                              className="w-10 h-10 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 dark:bg-gray-950 text-lg"
+                            >
+                              -
+                            </button>
+
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const nextQty = Math.max(
+                                  1,
+                                  Number(e.target.value) || 1
+                                );
+                                cartService.updateQuantity(cartKey, nextQty);
+                                refreshCart();
+                              }}
+                              className="w-16 h-10 border rounded-lg text-center"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextQty = Number(item.quantity) + 1;
+                                cartService.updateQuantity(cartKey, nextQty);
+                                refreshCart();
+                              }}
+                              className="w-10 h-10 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 dark:bg-gray-950 text-lg"
+                            >
+                              +
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                cartService.removeItem(cartKey);
+                                refreshCart();
+                              }}
+                              className="text-red-600 text-sm font-medium hover:underline"
+                            >
+                              Xóa
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="border rounded-2xl p-5 h-fit bg-gray-50 dark:bg-gray-950 lg:sticky lg:top-24">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">
+                  Tóm tắt đơn hàng
+                </h2>
+
+                <div className="flex justify-between text-gray-700 dark:text-gray-300 mb-3">
+                  <span>Tổng tiền</span>
+                  <span className="font-bold text-amber-600">
+                    {totalAmount.toLocaleString("vi-VN")}đ
+                  </span>
+                </div>
+
+                <Button
+                  className="w-full mt-4"
+                  onClick={() => navigate("/checkout")}
+                >
+                  Tiến hành thanh toán
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Cross-selling Section */}
+          {recommendations.length > 0 && (
+            <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                <span className="text-red-500">❤️</span> Có thể bạn sẽ thích
+              </h3>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {recommendations.map(product => {
+                  const defaultImage = "https://png.pngtree.com/png-vector/20190820/ourmid/pngtree-no-image-vector-illustration-isolated-png-image_1694547.jpg";
+                  const thumbnail = product.images?.find(img => img.isThumbnail === 1)?.image_url || product.images?.[0]?.image_url || defaultImage;
+                  const priceOption = product.sizes?.find(s => Number(s?.price) > 0) || product.sizes?.[0];
+                  const originalPrice = priceOption ? Number(priceOption.price) : 0;
+
+                  let salePrice = originalPrice;
+                  let isSale = activeSale && activeSale.product_ids?.includes(product.id);
+                  if (isSale) {
+                    salePrice = Math.round(originalPrice * (1 - activeSale.discount_percent / 100));
+                  }
+
+                  return (
+                    <div key={product.id} className="border border-gray-200 dark:border-gray-800 rounded-2xl p-3 bg-white dark:bg-gray-900 flex flex-col group relative overflow-hidden transition-all hover:border-amber-400">
+                      {isSale && (
+                        <div className="absolute top-2 left-2 z-10 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">
+                          GIẢM {activeSale.discount_percent}%
+                        </div>
+                      )}
+                      <img
+                        src={thumbnail}
+                        alt={product.name}
+                        onClick={() => navigate(`/products/${product.id}`)}
+                        className="w-full aspect-square object-cover rounded-xl cursor-pointer hover:scale-105 transition-transform duration-300 mb-3"
+                      />
+                      <div className="flex-1 flex flex-col justify-between">
+                        <h4
+                          onClick={() => navigate(`/products/${product.id}`)}
+                          className="font-semibold text-sm text-gray-800 dark:text-gray-200 line-clamp-2 cursor-pointer hover:text-amber-600 mb-2"
+                        >
+                          {product.name}
+                        </h4>
+
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-col">
+                            {isSale && originalPrice > 0 ? (
+                              <>
+                                <span className="text-[10px] text-gray-400 line-through decoration-gray-400">{originalPrice.toLocaleString('vi-VN')}đ</span>
+                                <span className="text-sm font-bold text-red-600">{salePrice.toLocaleString('vi-VN')}đ</span>
+                              </>
+                            ) : (
+                              <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{salePrice.toLocaleString('vi-VN')}đ</span>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={() => handleFastAdd(product)}
+                            className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400 flex items-center justify-center hover:bg-amber-500 hover:text-white transition-colors shadow-sm"
+                          >
+                            <Plus className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <Footer />
+    </div>
+  );
+}
