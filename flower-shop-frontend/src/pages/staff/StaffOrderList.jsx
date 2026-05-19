@@ -77,7 +77,7 @@ const STATUS_KANBAN_COLUMNS = [
   { key: "pending", label: "Đang chờ" },
   { key: "preparing", label: "Đang chuẩn bị" },
   { key: "completed", label: "Hoàn thành" },
-  { key: "cancelled", label: "Hủy" },
+
 ];
 
 const normalizeOrderType = (value) => {
@@ -98,7 +98,7 @@ const getOrderTypeLabel = (value) => {
 const getOrderTypeBadgeMeta = (value) => {
   const type = normalizeOrderType(value);
 
- 
+
 
   if (type === "takeaway") {
     return {
@@ -734,7 +734,28 @@ export function OrderDelivery() {
                   : "Nhận đơn"}
               </Button>
             ) : (isPreparing || order.status === "delivering") ? (
-              !hasPrintedReceipt ? (
+              ["takeaway", "dine-in"].includes(normalizedOrderType) ? (
+                <Button
+                  onClick={async () => {
+                    handlePrintReceipt(order.id);
+                    setCompletingId(order.id);
+                    try {
+                      const payload = !paid ? { cash_received: order.total_amount } : {};
+                      await orderOnlineService.completeDeliveryByStaff(order.id, payload);
+                      toast.success(`Đơn #${order.id} đã hoàn thành`);
+                      await loadOrders();
+                    } catch (error) {
+                      toast.error(error?.response?.data?.message || `Không thể hoàn thành đơn #${order.id}`);
+                    } finally {
+                      setCompletingId(null);
+                    }
+                  }}
+                  disabled={completingId === order.id}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {completingId === order.id ? "Đang xử lý..." : "In hóa đơn"}
+                </Button>
+              ) : !hasPrintedReceipt ? (
                 <Button
                   onClick={() => handlePrintReceipt(order.id)}
                 >
@@ -758,7 +779,7 @@ export function OrderDelivery() {
             {!(["completed", "cancelled"].includes(order.status) ||
               isPendingUnpaidOnline ||
               (isPending && paid) ||
-              (isPreparing && !hasPrintedReceipt)) ? (
+              isPreparing) ? (
               <Button
                 variant="destructive"
                 onClick={() =>
@@ -1176,7 +1197,7 @@ export function OrderDelivery() {
             >
               🎉 Khách nhận hàng
             </Button>
-            
+
             <Button
               size="lg"
               variant="destructive"
@@ -1189,8 +1210,8 @@ export function OrderDelivery() {
           </div>
 
           <div className="flex justify-center">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               onClick={() => setFulfillmentDialog({ open: false, order: null })}
               disabled={completingId === fulfillmentDialog.order?.id}
             >
